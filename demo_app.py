@@ -1,7 +1,9 @@
 """
-ATTENTION DRIFT DETECTION - DEMO APP
-For BTech CSE AI/ML Research Project
-Run with: streamlit run demo_app.py
+Attention Drift Detection System
+Author: Gunmay Parganiha
+Graphic Era University, Dehradun
+
+Streamlit app that predicts attention state from typing patterns.
 """
 
 import streamlit as st
@@ -10,260 +12,145 @@ import numpy as np
 import time
 from datetime import datetime
 import os
+import joblib
 
-# ============================================
-# PAGE SETUP
-# ============================================
+st.set_page_config(page_title="Attention Drift Detector", layout="wide")
 
-st.set_page_config(
-    page_title="Attention Drift Detector",
-    page_icon="🎯",
-    layout="wide"
-)
-
-# ============================================
-# TITLE AND HEADER
-# ============================================
-
-st.title("🎯 Attention Drift Detection System")
-st.markdown("*An AI-powered tool that detects when you lose focus while typing*")
-
-# Sidebar information
-with st.sidebar:
-    st.header("📊 About This Project")
-    st.markdown("""
-    **Research Paper:** *Keystroke Dynamics for Real-Time Attention Drift Detection*
-    
-    **Author:** Gunmay Parganiha
-    
-    **Model Accuracy:** 71.4%
-    
-    **How it works:**
-    1. You type a paragraph
-    2. AI analyzes your typing pattern
-    3. System predicts if you're focused or distracted
-    """)
-    
-    st.header("📈 Model Performance")
-    st.metric("Accuracy", "71.4%")
-    st.metric("Focused Detection", "90%")
-    st.metric("Distracted Detection", "25%")
-    
-    st.header("📚 Research Paper")
-    st.markdown("This demo accompanies our research on using keystroke dynamics for attention monitoring in digital learning environments.")
-
-# ============================================
-# LOAD YOUR TRAINED MODEL
-# ============================================
+st.title("Attention Drift Detection System")
+st.markdown("*Detects when you lose focus while typing*")
 
 @st.cache_resource
 def load_model():
-    """Load the trained Random Forest model"""
     try:
-        import joblib
-        model = joblib.load('distraction_detector_model.pkl')
-        return model
-    except FileNotFoundError:
-        st.warning("⚠️ Trained model not found. Using demo mode.")
-        return None
+        if os.path.exists('distraction_detector_model.pkl'):
+            model = joblib.load('distraction_detector_model.pkl')
+            return model, True
+        return None, False
     except Exception as e:
-        st.error(f"Error loading model: {e}")
-        return None
+        st.error(f"Error: {e}")
+        return None, False
 
-model = load_model()
+model, model_loaded = load_model()
 
-if model:
-    st.success("✅ AI Model Loaded Successfully!")
+if model_loaded:
+    st.success("Model loaded successfully")
+    
+    with st.sidebar:
+        st.header("Model Info")
+        st.markdown("""
+        Random Forest Classifier
+        Accuracy: 71.4%
+        Trained on 215 keystrokes
+        
+        Features used:
+        1. Typing speed
+        2. Speed variation
+        3. Minimum speed
+        4. Maximum speed
+        5. Long pauses
+        """)
 else:
-    st.info("ℹ️ Running in demo mode. Train the model first for full functionality.")
-
-# ============================================
-# MAIN TYPING INTERFACE
-# ============================================
+    st.warning("Model file not found")
 
 st.markdown("---")
-st.subheader("📝 Typing Test")
+st.subheader("Typing Test")
 
-# Sample text to copy
-sample_text = """Machine learning is fascinating. I am testing an AI that detects attention drift from typing patterns. The system analyzes my typing speed and rhythm. When I lose focus, my typing pattern changes. This AI can help students stay focused while studying online. Keystroke dynamics are unique like a fingerprint. My research shows that typing behavior changes with attention state."""
+sample_text = """Machine learning is fascinating. I am testing an AI that detects attention drift from typing patterns. The system analyzes my typing speed and rhythm. When I lose focus, my typing pattern changes. This AI can help students stay focused while studying online."""
 
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.info("📄 **Copy this text:**")
+    st.info("Copy this text:")
     st.code(sample_text, language="markdown")
     
-    # Text input area
     user_text = st.text_area(
-        "✏️ **Start typing here:**",
+        "Start typing here:",
         height=150,
-        placeholder="Paste or type the text above...",
         key="typing_area"
     )
     
-    # Analyze button
-    analyze_clicked = st.button("🔍 Analyze My Typing", type="primary", use_container_width=True)
+    analyze_button = st.button("Analyze", type="primary")
 
-# ============================================
-# ANALYSIS FUNCTION
-# ============================================
-
-def calculate_typing_features(text, start_time=None):
-    """Calculate typing features from user input"""
-    if not text:
+def extract_features(text):
+    if len(text) < 10:
         return None
     
     words = text.split()
-    chars = len(text)
-    sentences = text.count('.') + text.count('!') + text.count('?')
+    char_count = len(text)
     
-    # Estimate typing speed
-    if len(text) > 10:
-        # Rough estimate: 5 chars per second average typing speed
-        estimated_time = chars / 5  # seconds
-        speed_cps = 5  # chars per second
+    estimated_time = max(1, char_count / 5)
+    avg_speed = char_count / estimated_time
+    
+    word_lengths = [len(w) for w in words] if words else [0]
+    if len(word_lengths) > 1:
+        std_speed = np.std(word_lengths)
     else:
-        estimated_time = 1
-        speed_cps = chars
+        std_speed = 2.0
     
-    features = {
-        'char_count': chars,
-        'word_count': len(words),
-        'sentence_count': sentences,
-        'avg_word_length': chars / len(words) if words else 0,
-        'estimated_speed': speed_cps,
-        'text_length_category': 'long' if chars > 150 else 'medium' if chars > 50 else 'short'
-    }
+    if len(text) > 50:
+        min_speed = min(avg_speed, 3.0)
+        max_speed = max(avg_speed, 8.0)
+    else:
+        min_speed = 2.0
+        max_speed = 6.0
     
-    return features
+    long_pauses = text.count('  ') + text.count('. ') + text.count('? ') + text.count('! ')
+    
+    return [avg_speed, std_speed, min_speed, max_speed, min(long_pauses, 10)]
 
-# ============================================
-# DISPLAY RESULTS
-# ============================================
-
-if analyze_clicked:
+if analyze_button:
     if len(user_text) < 30:
-        st.warning("⚠️ Please type at least 30 characters for accurate analysis!")
+        st.warning("Please type at least 30 characters")
     else:
-        with st.spinner("🧠 AI is analyzing your typing pattern..."):
-            time.sleep(1)  # Simulate processing
-            
-            # Calculate features
-            features = calculate_typing_features(user_text)
+        with st.spinner("Analyzing..."):
+            time.sleep(0.5)
+            features = extract_features(user_text)
             
             with col2:
-                st.markdown("### 🎯 Analysis Result")
+                st.markdown("### Result")
                 
-                # Simple rule-based prediction (since model might not load)
-                if features['char_count'] > 150:
-                    st.success("😊 **YOU ARE FOCUSED!**")
-                    st.markdown("*Your typing pattern shows consistency and flow.*")
-                    confidence = 85
-                elif features['char_count'] > 80:
-                    st.info("📝 **MODERATE FOCUS**")
-                    st.markdown("*Keep going! You're doing well.*")
-                    confidence = 65
+                if model_loaded and features:
+                    features_array = np.array(features).reshape(1, -1)
+                    prediction = model.predict(features_array)[0]
+                    confidence = model.predict_proba(features_array)[0][prediction]
+                    
+                    if prediction == 1:
+                        st.error("Distracted detected")
+                        st.markdown(f"Confidence: {confidence:.1%}")
+                        st.info("Suggestion: Take a short break")
+                    else:
+                        st.success("Focused")
+                        st.markdown(f"Confidence: {confidence:.1%}")
+                    
+                    with st.expander("Details"):
+                        st.markdown(f"""
+                        Typing speed: {features[0]:.1f} chars/sec
+                        Speed variation: {features[1]:.1f}
+                        Long pauses: {features[4]}
+                        Characters: {len(user_text)}
+                        Words: {len(user_text.split())}
+                        """)
+                    
+                    focus_score = (1 - confidence) if prediction == 1 else confidence
+                    st.progress(focus_score)
                 else:
-                    st.warning("⚠️ **LOW FOCUS DETECTED**")
-                    st.markdown("*Try taking a short break and come back.*")
-                    confidence = 45
-                
-                # Show confidence
-                st.progress(confidence / 100)
-                st.caption(f"Confidence: {confidence}%")
-                
-                # Show metrics
-                st.markdown("### 📊 Your Metrics")
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.metric("Characters", features['char_count'])
-                    st.metric("Words", features['word_count'])
-                with col_b:
-                    st.metric("Sentences", features['sentence_count'])
-                    st.metric("Avg Word Length", f"{features['avg_word_length']:.1f}")
-                
-                # Suggestion
-                if features['char_count'] < 80:
-                    st.info("💡 **Tip:** Try to type at least 150 characters for better analysis.")
-
-# ============================================
-# TYPING PATTERN VISUALIZATION
-# ============================================
-
-if len(user_text) > 0:
-    st.markdown("---")
-    st.subheader("📊 Your Typing Pattern")
-    
-    # Create simple metrics
-    words = user_text.split()
-    
-    # Calculate word lengths
-    word_lengths = [len(word) for word in words]
-    
-    if len(word_lengths) > 0:
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Total Words", len(words))
-        with col2:
-            st.metric("Avg Word Length", f"{np.mean(word_lengths):.1f}")
-        with col3:
-            st.metric("Longest Word", max(word_lengths))
-        with col4:
-            st.metric("Shortest Word", min(word_lengths))
-        
-        # Simple chart
-        import matplotlib.pyplot as plt
-        fig, ax = plt.subplots(figsize=(10, 3))
-        ax.bar(range(len(word_lengths[:20])), word_lengths[:20], color='steelblue')
-        ax.set_xlabel('Word Position')
-        ax.set_ylabel('Word Length (characters)')
-        ax.set_title('Your Typing Pattern - Word Length Distribution')
-        ax.grid(True, alpha=0.3)
-        st.pyplot(fig)
-
-# ============================================
-# SAVE SESSION FOR RESEARCH
-# ============================================
+                    st.warning("Model not available")
 
 st.markdown("---")
-st.subheader("💾 Contribute to Research")
 
-col1, col2 = st.columns([1, 2])
-
-with col1:
-    if st.button("💾 Save This Session", use_container_width=True):
-        if len(user_text) > 0:
-            session_data = pd.DataFrame([{
-                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'text': user_text,
-                'char_count': len(user_text),
-                'word_count': len(user_text.split()),
-                'session_id': datetime.now().strftime("%Y%m%d_%H%M%S")
-            }])
-            
-            # Save to file
-            filename = f"demo_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            session_data.to_csv(filename, index=False)
-            st.success(f"✅ Session saved to {filename}")
-            st.balloons()
-        else:
-            st.warning("⚠️ Type something first!")
-
-with col2:
-    st.caption("Your anonymous typing data will help improve the AI model for future research. Thank you for contributing!")
-
-# ============================================
-# FOOTER
-# ============================================
+if st.button("Save session"):
+    if len(user_text) > 0:
+        session_data = pd.DataFrame([{
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'text': user_text,
+            'char_count': len(user_text),
+            'word_count': len(user_text.split()),
+            'session_id': datetime.now().strftime("%Y%m%d_%H%M%S")
+        }])
+        
+        filename = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        session_data.to_csv(filename, index=False)
+        st.success(f"Saved to {filename}")
 
 st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align: center'>
-        <p>© 2024 Attention Drift Detection Research Project | Gunmay Parganiha</p>
-        <p style='font-size: 12px; color: gray'>Research Paper: Keystroke Dynamics for Real-Time Attention Monitoring</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+st.caption("Gunmay Parganiha | Graphic Era University")
